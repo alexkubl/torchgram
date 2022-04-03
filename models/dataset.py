@@ -31,14 +31,14 @@ filters_list = open("/media/disk2/akublikova/GAN/filters.txt", "r").read().split
 
 
 
-def gen_filters():
-    f = (torch.randn(num_classes - 4) - 1.2)
-    f = torch.cat((torch.rand(4), f), 0) # torch.rand(num_classes) #
-    f = torch.clamp(f, 0, 1)  #torch.zeros(24) #
-    return f #torch.ones(1)/2
+# def gen_filters():
+#     f = (torch.randn(num_classes) - 1.2)
+# #     f = torch.cat((torch.rand(4), f), 0) # torch.rand(num_classes) #
+# #     f = torch.clamp(f, 0, 1)  #torch.zeros(24) #
+#     return f #torch.ones(1)/2
 
 def gen_filter():
-    return torch.rand(1) #torch.ones(1)/2
+    return torch.rand(num_classes) #torch.ones(1)/2
 
 def apply_filters(img, f): # img, f - tensors
     new_img = img

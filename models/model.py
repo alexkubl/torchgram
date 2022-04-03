@@ -24,11 +24,15 @@ def weights_init(m):
 class Generator(nn.Module):
     def __init__(self):
         super().__init__()
-        resnet = models.resnet101(pretrained=False)
+        resnet = models.resnet34(pretrained=False)
         self.features = nn.ModuleList(resnet.children())[:-1]
         self.features = nn.Sequential(*self.features)
+        self.features[2] = nn.LeakyReLU(0.3, inplace=True)
+        for name, module in self.named_modules():
+            if hasattr(module, 'relu'):
+                module.relu = nn.LeakyReLU(0.3, inplace=True)
         in_features = resnet.fc.in_features
-        self.fc = nn.Sequential(nn.Linear(in_features, num_classes), nn.Sigmoid())
+        self.fc = nn.Sequential(nn.Linear(in_features, num_classes), nn.Tanh()) 
     
     def forward(self, x):
         # change forward here
@@ -43,15 +47,19 @@ class Discriminator(nn.Module):
         resnet = models.resnet101(pretrained=False)
         self.features = nn.ModuleList(resnet.children())[:-1]
         self.features = nn.Sequential(*self.features)
+        self.features[2] = nn.LeakyReLU(0.3, inplace=True)
+        for name, module in self.named_modules():
+            if hasattr(module, 'relu'):
+                module.relu = nn.LeakyReLU(0.3, inplace=True)
         # Output layers
         in_features = resnet.fc.in_features
         self.adv_layer = nn.Linear(in_features, 1)
-#         self.aux_layer = nn.Sequential(nn.Linear(in_features, num_classes), nn.Sigmoid())
+        self.aux_layer = nn.Sequential(nn.Linear(in_features, num_classes), nn.Tanh())
 
     def forward(self, x):
         out = self.features(x)
         out = out.view(out.shape[0], -1)
         validity = self.adv_layer(out)
-#         label = self.aux_layer(out)
+        label = self.aux_layer(out)
 
-        return validity #label # 2 tensors: (size = 1 * batch_size, num_filters * batch_size)
+        return validity, label # 2 tensors: (size = 1 * batch_size, num_filters * batch_size)
