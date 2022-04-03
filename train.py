@@ -35,7 +35,7 @@ Tensor = torch.cuda.FloatTensor
 def compute_gradient_penalty(D, real_samples, fake_samples):
     alpha = Tensor(np.random.random((real_samples.size(0), 1, 1, 1)))
     interpolates = (alpha * real_samples + ((1 - alpha) * fake_samples)).requires_grad_(True)
-    d_interpolates = D(interpolates)
+    d_interpolates, _ = D(interpolates)
     fake = Variable(Tensor(real_samples.shape[0], 1).fill_(1.0), requires_grad=False)
 
     gradients = autograd.grad(
@@ -51,8 +51,11 @@ def compute_gradient_penalty(D, real_samples, fake_samples):
     
     
 if __name__ == "__main__":
-
-    wandb.init(project="wgan_gp", entity="alexkubl") #, resume=True
+    
+#     os.environ["WANDB_API_KEY"] = "6f18ccb3955f1fb0dadf1876f0704b5ae33cbfb0"
+#     os.environ["WANDB_MODE"] = "offline"
+    
+    wandb.init(project="wgan_gp_34", entity="alexkubl") #, resume=True , 
     
     parser = argparse.ArgumentParser(description='Description of your program')
     parser.add_argument('--n_epochs', type=int)
@@ -78,8 +81,8 @@ if __name__ == "__main__":
     auxiliary_loss = torch.nn.MSELoss() # mean square error
 
     
-    gen_path = "/media/disk2/akublikova/GAN/testing/models/generator.pt"
-    disc_path = "/media/disk2/akublikova/GAN/testing/models/discriminator.pt"
+    gen_path = "/media/disk2/akublikova/GAN/orig_wgan/models/generator34.pt"
+    disc_path = "/media/disk2/akublikova/GAN/orig_wgan/models/discriminator34.pt"
     
     # Initialize generator and discriminator
     generator = Generator()
@@ -97,13 +100,14 @@ if __name__ == "__main__":
 #     discriminator.load_state_dict(d_checkpoint['model_state_dict'])
 
     lambda_gp = 0.1
-    lr=0.0002
+    lr=0.0001
     n_critic = 5
-    
+    b1 = 0
+    b2 = 0.9
     # Setup Adam optimizers for both G and D
     
-    optimizer_D = optim.Adam(discriminator.parameters(), lr=lr)
-    optimizer_G = optim.Adam(generator.parameters(), lr=lr)
+    optimizer_D = optim.Adam(discriminator.parameters(), lr=lr, betas=(b1, b2))
+    optimizer_G = optim.Adam(generator.parameters(), lr=lr, betas=(b1, b2))
 
 #     if wandb.run.resumed:
 
@@ -139,34 +143,41 @@ if __name__ == "__main__":
         for i, (back, pair) in enumerate(zip(gen_back_dataloader, gen_obj_dataloader)):
 #             real_val = torch.ones(batch_size).unsqueeze(1).to(device)
 #             fake_val = torch.zeros(batch_size).unsqueeze(1).to(device)
-
             optimizer_D.zero_grad()
-            obj, mask = pair
-            back = back.to(device)
-            obj = obj.to(device)
-            mask = mask.to(device)
-            gen_labels = generator(torch.stack(concat_batch(back, obj, mask))) # filter generation
-            
-            gen_obj = torch.stack(apply_filter_batch(obj, gen_labels)) # apply generated filters
-            fake_imgs = torch.stack(concat_batch(back, gen_obj, mask))
-            
+            # reals
             real_imgs, labels = next(iter(disc_dataloader))
             real_imgs = Variable(real_imgs.type(Tensor))
             real_imgs = real_imgs.to(device)
             labels = labels.to(device)
             real_imgs = torch.stack(apply_filter_batch(real_imgs, labels)) # apply filters to real batch
             
-            fake_validity = discriminator(fake_imgs) # , fake_aux
-            real_validity = discriminator(real_imgs) # , real_aux
+            real_validity, real_aux = discriminator(real_imgs)
             
-#             d_fake_aux = auxiliary_loss(fake_aux, gen_labels)
-#             d_real_aux = auxiliary_loss(real_aux, labels)
-#             d_loss_aux = d_fake_aux + d_real_aux
+            # fakes 
+            obj, mask = pair
+            back = back.to(device)
+            fake_labels = (torch.randn(batch_size).unsqueeze(dim=1)).to(device)
+            back = torch.stack(apply_filter_batch(back, fake_labels))
+            obj = obj.to(device)
+            mask = mask.to(device)
+            
+            gen_labels = generator(torch.stack(concat_batch(back, obj, mask))) # filter generation
+            
+            gen_obj = torch.stack(apply_filter_batch(obj, gen_labels)) # apply generated filters
+            fake_imgs = torch.stack(concat_batch(back, gen_obj, mask))
+            fake_validity, fake_aux = discriminator(fake_imgs) # 
+            
+             # 
+            
+            d_fake_aux = auxiliary_loss(fake_aux, gen_labels)
+            d_real_aux = auxiliary_loss(real_aux, labels)
+            d_loss_aux = d_fake_aux + d_real_aux
+            
             gradient_penalty = compute_gradient_penalty(discriminator, real_imgs.data, fake_imgs.data)
             # Adversarial loss
-            d_loss = -torch.mean(real_validity) + torch.mean(fake_validity) + lambda_gp * gradient_penalty 
-#             d_loss = d_loss_adv + d_loss_aux
-
+            d_loss_adv = -torch.mean(real_validity) + torch.mean(fake_validity) + lambda_gp * gradient_penalty     
+            d_loss = d_loss_adv + d_loss_aux
+            
             d_loss.backward()
             optimizer_D.step()
             
@@ -175,6 +186,9 @@ if __name__ == "__main__":
             if i % n_critic == 0:
                 obj, mask = pair
                 back = back.to(device)
+                fake_labels = (torch.randn(batch_size).unsqueeze(dim=1)).to(device)
+                back = torch.stack(apply_filter_batch(back, fake_labels))
+                
                 obj = obj.to(device)
                 mask = mask.to(device)
                 gen_labels = generator(torch.stack(concat_batch(back, obj, mask))) # filter generation
@@ -182,10 +196,10 @@ if __name__ == "__main__":
                 gen_obj = torch.stack(apply_filter_batch(obj, gen_labels)) # applying 
                 fake_imgs = torch.stack(concat_batch(back, gen_obj, mask))
                 
-                fake_validity = discriminator(fake_imgs) #, fake_aux
-                g_loss = -torch.mean(fake_validity)
-#                 g_loss_aux = auxiliary_loss(gen_labels, fake_aux)
-#                 g_loss = g_loss_adv + g_loss_aux
+                fake_validity, fake_aux = discriminator(fake_imgs) #, fake_aux
+                g_loss_adv = -torch.mean(fake_validity)
+                g_loss_aux = 0.5 * (auxiliary_loss(gen_labels, fake_labels) + auxiliary_loss(gen_labels, fake_aux))
+                g_loss = g_loss_adv + g_loss_aux
                 g_loss.backward()
                 optimizer_G.step()
                       
@@ -196,7 +210,13 @@ if __name__ == "__main__":
 
                 i += 1
                 wandb.log({"d_loss": d_loss, 
-                    "g_loss": g_loss,            
+                    "g_loss": g_loss,  
+                    "g_loss_adv": g_loss_adv,
+                    "g_loss_aux": g_loss_aux,
+                    "d_loss_aux": d_loss_aux,
+                    "d_loss_adv": d_loss_adv,
+                    "d_real_aux": d_real_aux,   
+                    "d_fake_aux": d_fake_aux,
                 })
         
         # after one epoch saving the models with loss and checkpoints    
